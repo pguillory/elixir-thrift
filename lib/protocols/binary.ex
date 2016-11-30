@@ -1,5 +1,4 @@
 defmodule Thrift.Protocols.Binary do
-  alias Thrift.Parser.FileGroup
   alias Thrift.Generator.Utils
 
   # field types, which are the type ids from the thrift spec.
@@ -30,19 +29,11 @@ defmodule Thrift.Protocols.Binary do
            list: @list
           }
 
-  alias Thrift.Parser.Models.{
-    Exception,
-    Field,
-    Struct,
-    TEnum,
-  }
-
-  def build(file_group, struct) do
+  def build(file_group, name, fields) do
     alias Thrift.Generator.Models.BinaryProtocol, as: Deserializer
-    name = FileGroup.dest_module(file_group, struct.name)
 
     defs = [
-      Deserializer.struct_deserializer(struct, name, file_group),
+      Deserializer.struct_deserializer(fields, name, file_group),
     ]
     |> Utils.merge_blocks
     |> Utils.sort_defs

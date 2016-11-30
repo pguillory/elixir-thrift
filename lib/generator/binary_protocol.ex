@@ -41,7 +41,7 @@ defmodule Thrift.Generator.Models.BinaryProtocol do
   alias Thrift.Generator.Utils
   alias Thrift.Parser.FileGroup
   alias Thrift.Parser.Models.{
-    # Exception,
+    Exception,
     Field,
     Struct,
     StructRef,
@@ -53,7 +53,7 @@ defmodule Thrift.Generator.Models.BinaryProtocol do
 
   At the moment it also generates an experimental serializer that may be faster.
   """
-  def struct_deserializer(%{fields: fields}, name, file_group) do
+  def struct_deserializer(fields, name, file_group) do
     field_matchers = Enum.map(fields, fn %Field{name: name} ->
       {name, Macro.var(name, nil)}
     end)
@@ -155,6 +155,15 @@ defmodule Thrift.Generator.Models.BinaryProtocol do
     quote do
       defp unquote(name)(<<11, unquote(field.id)::16-signed, string_size::32-signed, rest::binary>>, acc) do
         <<value::binary-size(string_size), rest::binary>> = rest
+        unquote(name)(rest, %{acc | unquote(field.name) => value})
+      end
+    end
+  end
+  def field_deserializer(struct=%Exception{}, field, name, file_group) do
+    dest_module = FileGroup.dest_module(file_group, struct)
+    quote do
+      defp unquote(name)(<<12, unquote(field.id)::16-signed, rest::binary>>, acc) do
+        {value, rest} = unquote(dest_module).BinaryProtocol.deserialize(rest)
         unquote(name)(rest, %{acc | unquote(field.name) => value})
       end
     end
@@ -588,7 +597,13 @@ defmodule Thrift.Generator.Models.BinaryProtocol do
       ]
     end
   end
-  def value_serializer(struct=%Struct{name: _name}, var, file_group) do
+  def value_serializer(struct=%Exception{}, var, file_group) do
+    dest_module = FileGroup.dest_module(file_group, struct)
+    quote do
+      unquote(dest_module).serialize(unquote(var))
+    end
+  end
+  def value_serializer(struct=%Struct{}, var, file_group) do
     dest_module = FileGroup.dest_module(file_group, struct)
     quote do
       unquote(dest_module).serialize(unquote(var))
@@ -611,6 +626,7 @@ defmodule Thrift.Generator.Models.BinaryProtocol do
   def type_id(:string, _file_group), do: 11
   def type_id(:binary, _file_group), do: 11
   def type_id(%Struct{}, _file_group), do: 12
+  def type_id(%Exception{}, _file_group), do: 12
   def type_id({:map, _}, _file_group), do: 13
   def type_id({:set, _}, _file_group), do: 14
   def type_id({:list, _}, _file_group), do: 15

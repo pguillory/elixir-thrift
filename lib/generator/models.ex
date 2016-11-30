@@ -35,6 +35,7 @@ defmodule Thrift.Generator.Models do
       generate_enums(schema),
       generate_structs(schema),
       generate_exceptions(schema),
+      generate_services(schema),
     ])
   end
 
@@ -98,31 +99,31 @@ defmodule Thrift.Generator.Models do
   defp generate_structs(schema) do
     for {name, struct} <- schema.structs do
       full_name = namespace(schema) |> Module.concat(name)
-      {full_name, generate_struct("struct", schema, full_name, struct)}
+      {full_name, generate_struct("struct #{struct.name}", schema.file_group, full_name, struct.fields)}
     end
   end
 
   defp generate_exceptions(schema) do
     for {name, struct} <- schema.exceptions do
       full_name = namespace(schema) |> Module.concat(name)
-      {full_name, generate_struct("exception", schema, full_name, struct)}
+      {full_name, generate_struct("exception #{struct.name}", schema.file_group, full_name, struct.fields)}
     end
   end
 
-  defp generate_struct(label, schema, name, struct) do
-    struct_parts = Enum.map(struct.fields, fn
+  defp generate_struct(label, file_group, module_name, fields) do
+    struct_parts = Enum.map(fields, fn
       %{name: name, default: nil, type: type} ->
-        {name, zero(schema, type)}
+        {name, nil}
       %{name: name, default: default} when not is_nil(default) ->
         {name, default}
     end)
-    binary_protocol = Binary.build(schema.file_group, struct)
+    binary_protocol = Binary.build(file_group, module_name, fields)
     quote do
-      defmodule unquote(name) do
-        _ = unquote "Auto-generated Thrift #{label} #{struct.name}"
-        unquote_splicing(for field <- struct.fields do
+      defmodule unquote(module_name) do
+        _ = unquote "Auto-generated Thrift #{label}"
+        unquote_splicing(for field <- fields do
           quote do
-            _ = unquote "#{field.id}: #{to_thrift(field.type, schema.file_group)} #{field.name}"
+            _ = unquote "#{field.id}: #{to_thrift(field.type, file_group)} #{field.name}"
           end
         end)
         defstruct unquote(struct_parts)
@@ -142,6 +143,97 @@ defmodule Thrift.Generator.Models do
         end
       end
     end
+  end
+
+  alias Thrift.Parser.Models.Service
+
+  defp generate_services(schema) do
+    for {name, %Service{functions: functions, extends: parent}} <- schema.services do
+      full_name = namespace(schema) |> Module.concat(name)
+      {full_name, generate_service(schema.file_group, full_name, functions, parent)}
+    end
+  end
+
+  defp generate_service(file_group, module_name, functions, nil) do
+    for {name, function} <- functions do
+      IO.inspect name
+      IO.puts "#{inspect function}"
+    end
+
+    quote do
+      defmodule unquote(module_name) do
+        unquote_splicing(Enum.map(functions, fn
+          {name, function=%{return_type: :void}} ->
+            []
+          {name, function} ->
+            request_name = name |> to_string |> Macro.camelize |> Module.concat(Request)
+            response_name = name |> to_string |> Macro.camelize |> Module.concat(Response)
+            success = %Thrift.Parser.Models.Field{
+              id: 0,
+              name: :success,
+              required: false,
+              type: function.return_type
+            }
+            quote do
+              unquote generate_struct("#{function.name} request", file_group, request_name, function.params)
+              unquote generate_struct("#{function.name} response", file_group, response_name, [success | function.exceptions])
+              unquote message_deserializer(function.name, [])
+            end
+        end))
+      end
+    end
+  end
+
+  defp message_deserializer(method_name, params) do
+    method_name = to_string(method_name)
+    quote do
+      defp handle_request(<<128, 1, _, @call, unquote(byte_size(method_name))::size(32), unquote(method_name), seq_id::32-signed, rest::binary>>) do
+        {request, ""} = unquote(Macro.camelize(method_name) |> String.to_atom).Request.deserialize(rest)
+        try do
+          Task.async(fn ->
+            try do
+              __MODULE__.Methods.calculate(request.logid, request.w)
+            catch e ->
+              {:throw, e}
+            rescue e ->
+              {:rescue, e}
+            else result ->
+              {:success, result}
+            end
+          end)
+          |> Task.await(:infinity)
+        else
+          {:success, result} ->
+            [
+              <<128, 1, 0, @reply, unquote(byte_size(method_name))::size(32), unquote(method_name), seq_id::size(32)>>,
+              %unquote(Macro.camelize(method_name) |> String.to_atom).Response{success: result}
+              |> unquote(Macro.camelize(method_name) |> String.to_atom).Response.serialize()
+            ]
+          {:throw, %Tutorial.InvalidOperation{}=e} ->
+            [
+              <<128, 1, 0, @reply, unquote(byte_size(method_name))::size(32), unquote(method_name), seq_id::size(32)>>,
+              %unquote(Macro.camelize(method_name) |> String.to_atom).Response{ouch: e}
+              |> unquote(Macro.camelize(method_name) |> String.to_atom).Response.serialize()
+            ]
+              # @struct, 0, 1,
+              #   @i32, 0, 1, whatOp::size(32),
+              #   @string, 0, 2, byte_size(why)::size(32), why::binary,
+              #   0,
+              # 0>>
+          {:rescue, %{message: message}} ->
+            <<128, 1, 0, @exception, unquote(byte_size(method_name))::size(32), unquote(method_name), seq_id::size(32),
+              @string, 0, 1, byte_size(message)::size(32), message::binary,
+              @i32, 0, 2, @internal_error::32-signed,
+              0>>
+        end
+      end
+    end
+  end
+
+  defp generate_service(file_group, full_name, functions, parent) when is_atom(parent) do
+    %Service{functions: parent_functions, extends: parent} = FileGroup.resolve(file_group, parent)
+    functions = Map.merge(functions, parent_functions)
+    generate_service(file_group, full_name, functions, parent)
   end
 
   # Zero values for built-in types
@@ -195,6 +287,9 @@ defmodule Thrift.Generator.Models do
     "list<#{to_thrift element_type, file_group}>"
   end
   def to_thrift(%Thrift.Parser.Models.TEnum{name: name}, _file_group) do
+    "#{name}"
+  end
+  def to_thrift(%Thrift.Parser.Models.Exception{name: name}, _file_group) do
     "#{name}"
   end
   def to_thrift(%Thrift.Parser.Models.Struct{name: name}, _file_group) do

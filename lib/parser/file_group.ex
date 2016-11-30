@@ -13,6 +13,7 @@ defmodule Thrift.Parser.FileGroup do
   }
 
   alias Thrift.Parser.Models.{
+    Exception,
     Field,
     Namespace,
     StructRef,
@@ -106,8 +107,12 @@ defmodule Thrift.Parser.FileGroup do
     # remote mappings like :"common.Weather"
     resolutions[path]
   end
-  def resolve(_, other) do
+  def resolve(%FileGroup{}, other) do
     other
+  end
+
+  def dest_module(file_group, %Exception{name: name}) do
+    dest_module(file_group, name)
   end
 
   def dest_module(file_group, %Struct{name: name}) do
