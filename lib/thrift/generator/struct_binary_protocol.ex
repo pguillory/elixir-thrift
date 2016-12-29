@@ -66,8 +66,19 @@ defmodule Thrift.Generator.StructBinaryProtocol do
   Generate a deserializer for a Thrift struct, union or exception.
   """
   def struct_deserializer(struct, struct_name, file_group) do
-    struct_deserializer(struct, struct_name, :deserialize, file_group)
+    quote do
+      def deserialize(binary) do
+        deserialize(binary, [%unquote(struct_name){}])
+      end
+      defp deserialize(<<0, rest::binary>>, [%unquote(struct_name){} = struct]) do
+        {struct, rest}
+      end
+      unquote(struct_deserializer(struct, struct_name, :deserialize, file_group))
+
+      unquote(field_skippers)
+    end
   end
+
   def struct_deserializer(%{fields: fields}, struct_name, def_name, file_group) do
     fields = Enum.reject(fields, &(&1.type == :void))
 
@@ -76,13 +87,6 @@ defmodule Thrift.Generator.StructBinaryProtocol do
     |> Utils.merge_blocks
 
     quote do
-      def unquote(def_name)(binary) do
-        unquote(def_name)(binary, [%unquote(struct_name){}])
-      end
-      defp unquote(def_name)(<<0, rest::binary>>, [%unquote(struct_name){} = struct]) do
-        {struct, rest}
-      end
-
       unquote_splicing(field_deserializers)
 
       defp unquote(def_name)(<<field_type, _id::16-signed, rest::binary>>, context) do
@@ -92,8 +96,6 @@ defmodule Thrift.Generator.StructBinaryProtocol do
         |> skip_field(field_type)
         |> unquote(def_name)(context)
       end
-
-      unquote(field_skippers)
 
       defp unquote(def_name)(_, _), do: :error
     end
