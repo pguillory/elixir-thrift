@@ -65,34 +65,37 @@ defmodule Thrift.Generator.StructBinaryProtocol do
   @doc """
   Generate a deserializer for a Thrift struct, union or exception.
   """
-  def struct_deserializer(%{fields: fields}, name, file_group) do
+  def struct_deserializer(struct, struct_name, file_group) do
+    struct_deserializer(struct, struct_name, :deserialize, file_group)
+  end
+  def struct_deserializer(%{fields: fields}, struct_name, def_name, file_group) do
     fields = Enum.reject(fields, &(&1.type == :void))
 
     field_deserializers = fields
-    |> Enum.map(&field_deserializer(&1.type, &1, :deserialize, file_group))
+    |> Enum.map(&field_deserializer(&1.type, &1, struct_name, def_name, file_group))
     |> Utils.merge_blocks
 
     quote do
-      def deserialize(binary) do
-        deserialize(binary, %unquote(name){})
+      def unquote(def_name)(binary) do
+        unquote(def_name)(binary, [%unquote(struct_name){}])
       end
-      defp deserialize(<<0, rest::binary>>, %unquote(name){} = acc) do
-        {acc, rest}
+      defp unquote(def_name)(<<0, rest::binary>>, [%unquote(struct_name){} = struct]) do
+        {struct, rest}
       end
 
       unquote_splicing(field_deserializers)
 
-      defp deserialize(<<field_type, _id::16-signed, rest::binary>>, acc) do
+      defp unquote(def_name)(<<field_type, _id::16-signed, rest::binary>>, context) do
         # this is for unknown fields. This can happen if you have an
         # outdated schema
         rest
         |> skip_field(field_type)
-        |> deserialize(acc)
+        |> unquote(def_name)(context)
       end
 
       unquote(field_skippers)
 
-      defp deserialize(_, _), do: :error
+      defp unquote(def_name)(_, _), do: :error
     end
   end
 
@@ -170,112 +173,112 @@ defmodule Thrift.Generator.StructBinaryProtocol do
     end
   end
 
-  defp field_deserializer(:bool, field, name, _file_group) do
+  defp field_deserializer(:bool, field, struct_name, name, _file_group) do
     quote do
-      defp unquote(name)(<<unquote(@bool), unquote(field.id)::size(16), 1, rest::binary>>, acc) do
-        unquote(name)(rest, %{acc | unquote(field.name) => true})
+      defp unquote(name)(<<unquote(@bool), unquote(field.id)::size(16), 1, rest::binary>>, [struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => true} | context])
       end
-      defp unquote(name)(<<unquote(@bool), unquote(field.id)::size(16), 0, rest::binary>>, acc) do
-        unquote(name)(rest, %{acc | unquote(field.name) => false})
+      defp unquote(name)(<<unquote(@bool), unquote(field.id)::size(16), 0, rest::binary>>, [struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => false} | context])
       end
     end
   end
-  defp field_deserializer(:byte, field, name, file_group) do
-    field_deserializer(:i8, field, name, file_group)
+  defp field_deserializer(:byte, field, struct_name, name, file_group) do
+    field_deserializer(:i8, field, struct_name, name, file_group)
   end
-  defp field_deserializer(:i8, field, name, _file_group) do
+  defp field_deserializer(:i8, field, struct_name, name, _file_group) do
     quote do
-      defp unquote(name)(<<unquote(@byte), unquote(field.id)::size(16), value, rest::binary>>, acc) do
-        unquote(name)(rest, %{acc | unquote(field.name) => value})
+      defp unquote(name)(<<unquote(@byte), unquote(field.id)::size(16), value, rest::binary>>, [struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
       end
     end
   end
-  defp field_deserializer(:double, field, name, _file_group) do
+  defp field_deserializer(:double, field, struct_name, name, _file_group) do
     quote do
-      defp unquote(name)(<<unquote(@double), unquote(field.id)::size(16), value::signed-float, rest::binary>>, acc) do
-        unquote(name)(rest, %{acc | unquote(field.name) => value})
+      defp unquote(name)(<<unquote(@double), unquote(field.id)::size(16), value::signed-float, rest::binary>>, [struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
       end
     end
   end
-  defp field_deserializer(:i16, field, name, _file_group) do
+  defp field_deserializer(:i16, field, struct_name, name, _file_group) do
     quote do
-      defp unquote(name)(<<unquote(@i16), unquote(field.id)::size(16), value::size(16), rest::binary>>, acc) do
-        unquote(name)(rest, %{acc | unquote(field.name) => value})
+      defp unquote(name)(<<unquote(@i16), unquote(field.id)::size(16), value::size(16), rest::binary>>, [struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
       end
     end
   end
-  defp field_deserializer(:i32, field, name, _file_group) do
+  defp field_deserializer(:i32, field, struct_name, name, _file_group) do
     quote do
-      defp unquote(name)(<<unquote(@i32), unquote(field.id)::size(16), value::size(32), rest::binary>>, acc) do
-        unquote(name)(rest, %{acc | unquote(field.name) => value})
+      defp unquote(name)(<<unquote(@i32), unquote(field.id)::size(16), value::size(32), rest::binary>>, [struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
       end
     end
   end
-  defp field_deserializer(%TEnum{}, field, name, file_group) do
-    field_deserializer(:i32, field, name, file_group)
+  defp field_deserializer(%TEnum{}, field, struct_name, name, file_group) do
+    field_deserializer(:i32, field, struct_name, name, file_group)
   end
-  defp field_deserializer(:i64, field, name, _file_group) do
+  defp field_deserializer(:i64, field, struct_name, name, _file_group) do
     quote do
-      defp unquote(name)(<<unquote(@i64), unquote(field.id)::size(16), value::size(64), rest::binary>>, acc) do
-        unquote(name)(rest, %{acc | unquote(field.name) => value})
+      defp unquote(name)(<<unquote(@i64), unquote(field.id)::size(16), value::size(64), rest::binary>>, [struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
       end
     end
   end
-  defp field_deserializer(:binary, field, name, file_group) do
-    field_deserializer(:string, field, name, file_group)
+  defp field_deserializer(:binary, field, struct_name, name, file_group) do
+    field_deserializer(:string, field, struct_name, name, file_group)
   end
-  defp field_deserializer(:string, field, name, _file_group) do
+  defp field_deserializer(:string, field, struct_name, name, _file_group) do
     quote do
       defp unquote(name)(<<unquote(@string),
                          unquote(field.id)::16-signed,
                          string_size::32-signed,
                          value::binary-size(string_size),
-                         rest::binary>>, acc) do
+                         rest::binary>>, [struct | context]) do
 
-        unquote(name)(rest, %{acc | unquote(field.name) => value})
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
       end
     end
   end
-  defp field_deserializer(%Struct{} = struct, field, name, file_group) do
+  defp field_deserializer(%Struct{} = struct, field, struct_name, name, file_group) do
     dest_module = FileGroup.dest_module(file_group, struct)
     quote do
-      defp unquote(name)(<<unquote(@struct), unquote(field.id)::16-signed, rest::binary>>, acc) do
+      defp unquote(name)(<<unquote(@struct), unquote(field.id)::16-signed, rest::binary>>, [struct | context]) do
         case unquote(dest_module).BinaryProtocol.deserialize(rest) do
           {value, rest} ->
-            unquote(name)(rest, %{acc | unquote(field.name) => value})
+            unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
           :error ->
             :error
         end
       end
     end
   end
-  defp field_deserializer(%Union{} = union, field, name, file_group) do
+  defp field_deserializer(%Union{} = union, field, struct_name, name, file_group) do
     dest_module = FileGroup.dest_module(file_group, union)
     quote do
-      defp unquote(name)(<<unquote(@union), unquote(field.id)::16-signed, rest::binary>>, acc) do
+      defp unquote(name)(<<unquote(@union), unquote(field.id)::16-signed, rest::binary>>, [struct | context]) do
         case unquote(dest_module).BinaryProtocol.deserialize(rest) do
           {value, rest} ->
-            unquote(name)(rest, %{acc | unquote(field.name) => value})
+            unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
           :error ->
             :error
         end
       end
     end
   end
-  defp field_deserializer(%Exception{} = struct, field, name, file_group) do
+  defp field_deserializer(%Exception{} = struct, field, struct_name, name, file_group) do
     dest_module = FileGroup.dest_module(file_group, struct)
     quote do
-      defp unquote(name)(<<unquote(@struct), unquote(field.id)::16-signed, rest::binary>>, acc) do
+      defp unquote(name)(<<unquote(@struct), unquote(field.id)::16-signed, rest::binary>>, [struct | context]) do
         case unquote(dest_module).BinaryProtocol.deserialize(rest) do
           {value, rest} ->
-            unquote(name)(rest, %{acc | unquote(field.name) => value})
+            unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => value} | context])
           :error ->
             :error
         end
       end
     end
   end
-  defp field_deserializer({:map, {key_type, value_type}}, field, name, file_group) do
+  defp field_deserializer({:map, {key_type, value_type}}, field, struct_name, name, file_group) do
     key_name = :"#{name}__#{field.name}__key"
     value_name = :"#{name}__#{field.name}__value"
     quote do
@@ -284,11 +287,11 @@ defmodule Thrift.Generator.StructBinaryProtocol do
                            unquote(type_id(key_type, file_group)),
                            unquote(type_id(value_type, file_group)),
                            map_size::size(32),
-                           rest::binary>>, struct) do
-        unquote(key_name)(rest, [%{}, map_size, struct])
+                           rest::binary>>, context) do
+        unquote(key_name)(rest, [%{}, map_size | context])
       end
-      defp unquote(key_name)(<<rest::binary>>, [map, 0, struct]) do
-        unquote(name)(rest, %{struct | unquote(field.name) => map})
+      defp unquote(key_name)(<<rest::binary>>, [map, 0, struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => map} | context])
       end
       unquote(map_key_deserializer(key_type, key_name, value_name, file_group))
       unquote(map_value_deserializer(value_type, key_name, value_name, file_group))
@@ -296,43 +299,43 @@ defmodule Thrift.Generator.StructBinaryProtocol do
       defp unquote(value_name)(_, _, _), do: :error
     end
   end
-  defp field_deserializer({:set, element_type}, field, name, file_group) do
+  defp field_deserializer({:set, element_type}, field, struct_name, name, file_group) do
     sub_name = :"#{name}__#{field.name}"
     quote do
       defp unquote(name)(<<unquote(@set),
                            unquote(field.id)::size(16),
                            unquote(type_id(element_type, file_group)),
                            remaining::size(32),
-                           rest::binary>>, struct) do
-        unquote(sub_name)(rest, [[], remaining, struct])
+                           rest::binary>>, context) do
+        unquote(sub_name)(rest, [[], remaining | context])
       end
-      defp unquote(sub_name)(<<rest::binary>>, [list, 0, struct]) do
-        unquote(name)(rest, %{struct | unquote(field.name) => MapSet.new(Enum.reverse(list))})
+      defp unquote(sub_name)(<<rest::binary>>, [list, 0, struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => MapSet.new(Enum.reverse(list))} | context])
       end
       unquote(list_deserializer(element_type, sub_name, file_group))
       defp unquote(sub_name)(_, _), do: :error
     end
   end
-  defp field_deserializer({:list, element_type}, field, name, file_group) do
+  defp field_deserializer({:list, element_type}, field, struct_name, name, file_group) do
     sub_name = :"#{name}__#{field.name}"
     quote do
       defp unquote(name)(<<unquote(@list),
                            unquote(field.id)::size(16),
                            unquote(type_id(element_type, file_group)),
                            remaining::size(32),
-                           rest::binary>>, struct) do
-        unquote(sub_name)(rest, [[], remaining, struct])
+                           rest::binary>>, context) do
+        unquote(sub_name)(rest, [[], remaining | context])
       end
-      defp unquote(sub_name)(<<rest::binary>>, [list, 0, struct]) do
-        unquote(name)(rest, %{struct | unquote(field.name) => Enum.reverse(list)})
+      defp unquote(sub_name)(<<rest::binary>>, [list, 0, struct | context]) do
+        unquote(name)(rest, [%unquote(struct_name){struct | unquote(field.name) => Enum.reverse(list)} | context])
       end
       unquote(list_deserializer(element_type, sub_name, file_group))
       defp unquote(sub_name)(_, _), do: :error
     end
   end
-  defp field_deserializer(%StructRef{referenced_type: type}, field, name, file_group) do
+  defp field_deserializer(%StructRef{referenced_type: type}, field, struct_name, name, file_group) do
     FileGroup.resolve(file_group, type)
-    |> field_deserializer(field, name, file_group)
+    |> field_deserializer(field, struct_name, name, file_group)
   end
 
   defp map_key_deserializer(:bool, key_name, value_name, _file_group) do
