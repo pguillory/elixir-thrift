@@ -38,6 +38,7 @@ defmodule ThriftTestCase do
 
     modules = caller.module
     |> Module.get_attribute(:thrift_file)
+    |> IO.inspect
     |> Enum.reverse
     |> Enum.map(fn [name: filename, contents: contents] ->
       filename = Path.expand(filename, dir)

@@ -1,5 +1,5 @@
 defmodule Thrift.Generator.BinaryProtocolTest do
-  use ThriftTestCase, cleanup: false
+  use ThriftTestCase #, cleanup: false
 
   alias Thrift.Protocols.Binary
   alias Thrift.Union.TooManyFieldsSetException
