@@ -130,7 +130,7 @@ defmodule ParserUtils do
   def serialize_nesting(nesting, opts \\ [])
   def serialize_nesting(nesting, opts) when is_map(nesting) do
     alias Nesting.BinaryProtocol
-    serialized = BinaryProtocol.serialize(:struct, nesting)
+    serialized = BinaryProtocol.serialize(nesting)
     if Keyword.get(opts, :convert_to_binary, true) do
       IO.iodata_to_binary(serialized)
     else

@@ -32,11 +32,16 @@ defmodule BinaryProtocolBenchmark do
     end
 
     elixir_users = for _ <- 1..1000 do
-      user(:elixir, user_options)
+      nesting(:elixir, user_options)
     end
 
-    user_binary = user(:elixir, user_options)
-    |> serialize_user_elixir(convert_to_binary: true)
+    user = user(:elixir, user_options)
+
+    # user_binary = user(:elixir, user_options)
+    # |> serialize_user_elixir(convert_to_binary: true)
+    user_binary = nesting(:elixir, user: user)
+    |> serialize_nesting(convert_to_binary: true)
+
 
     context = [
       elixir_users: elixir_users,
@@ -46,48 +51,48 @@ defmodule BinaryProtocolBenchmark do
     {:ok, context}
   end
 
-  bench "erlang serialization (converted to binary)" do
-    for user <- bench_context[:erlang_users] do
-      serialize_user_erlang(user, convert_to_binary: true)
-    end
-    :ok
-  end
+  # bench "erlang serialization (converted to binary)" do
+  #   for user <- bench_context[:erlang_users] do
+  #     serialize_user_erlang(user, convert_to_binary: true)
+  #   end
+  #   :ok
+  # end
 
-  bench "erlang serialization left as IOList" do
-    for user <- bench_context[:erlang_users] do
-      serialize_user_erlang(user, convert_to_binary: false)
-    end
-    :ok
-  end
+  # bench "erlang serialization left as IOList" do
+  #   for user <- bench_context[:erlang_users] do
+  #     serialize_user_erlang(user, convert_to_binary: false)
+  #   end
+  #   :ok
+  # end
 
-  bench "elixir serialization (iolist_size)" do
-    for user <- bench_context[:elixir_users] do
-      serialize_user_elixir(user, convert_to_binary: false)
-      |> :erlang.iolist_size
-    end
-    :ok
-  end
+  # bench "elixir serialization (iolist_size)" do
+  #   for user <- bench_context[:elixir_users] do
+  #     serialize_user_elixir(user, convert_to_binary: false)
+  #     |> :erlang.iolist_size
+  #   end
+  #   :ok
+  # end
 
-  bench "elixir serialization (converted to binary)" do
-    for user <- bench_context[:elixir_users] do
-      serialize_user_elixir(user, convert_to_binary: true)
-    end
-    :ok
-  end
+  # bench "elixir serialization (converted to binary)" do
+  #   for user <- bench_context[:elixir_users] do
+  #     serialize_user_elixir(user, convert_to_binary: true)
+  #   end
+  #   :ok
+  # end
 
-  bench "elixir serialization (left as IOList)" do
-    for user <- bench_context[:elixir_users] do
-      serialize_user_elixir(user, convert_to_binary: false)
-    end
-    :ok
-  end
+  # bench "elixir serialization (left as IOList)" do
+  #   for user <- bench_context[:elixir_users] do
+  #     serialize_user_elixir(user, convert_to_binary: false)
+  #   end
+  #   :ok
+  # end
 
-  bench "erlang deserialization" do
-    for _ <- 1..1000 do
-      deserialize_user_erlang(bench_context[:user_binary])
-    end
-    :ok
-  end
+  # bench "erlang deserialization" do
+  #   for _ <- 1..1000 do
+  #     deserialize_user_erlang(bench_context[:user_binary])
+  #   end
+  #   :ok
+  # end
 
   bench "elixir deserialization" do
     for _ <- 1..1000 do
