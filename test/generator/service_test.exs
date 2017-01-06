@@ -1,5 +1,5 @@
 defmodule Thrift.Generator.ServiceTest do
-  use ThriftTestCase, gen_erl: true
+  use ThriftTestCase, gen_erl: true, cleanup: false
 
   @thrift_file name: "simple_service.thrift", contents: """
   namespace elixir Services.Simple

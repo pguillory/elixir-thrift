@@ -29,68 +29,62 @@ defmodule Thrift.Generator.Binary.Framed.Server do
     end
   end
 
-  def generate_handler_function(file_group, service_module, %Function{params: []} = function) do
-    fn_name = Atom.to_string(function.name)
-    handler_fn_name = Utils.underscore(function.name)
-    response_module = service_module
-    |> Module.concat(Service.module_name(function, :response))
+  # def generate_handler_function(file_group, service_module, %Function{params: []} = function) do
+  #   fn_name = Atom.to_string(function.name)
+  #   handler_fn_name = Utils.underscore(function.name)
+  #   response_module = Module.concat(service_module, Service.module_name(function, :response))
 
-    handler = quote do
-      rsp = handler_module.unquote(handler_fn_name)()
-      unquote(build_responder(function.return_type, response_module))
-    end
-    |> wrap_with_try_catch(function, file_group, response_module)
-
-    quote do
-      def handle_thrift(unquote(fn_name), _binary_data, handler_module) do
-        unquote(handler)
-      end
-    end
-  end
+  #   quote do
+  #     def handle_thrift(unquote(fn_name), _binary_data, handler_module) do
+  #       try do
+  #         handler_module.unquote(handler_fn_name)()
+  #       rescue
+  #         unquote(rescue_blocks(function, file_group, response_module))
+  #       catch
+  #         unquote(catch_block)
+  #       else
+  #         unquote(else_block(function, response_module))
+  #       end
+  #     end
+  #   end
+  # end
   def generate_handler_function(file_group, service_module, function) do
-    fn_name = Atom.to_string(function.name)
-    args_module = service_module
-    |> Module.concat(Service.module_name(function, :args))
-
-    response_module = service_module
-    |> Module.concat(Service.module_name(function, :response))
-
-    struct_matches = function.params
-    |> Enum.map(fn param ->
-      {param.name, Macro.var(param.name, nil)}
-    end)
+    # fn_name = Atom.to_string(function.name)
+    handler_fn_name = Utils.underscore(function.name)
+    handler_args = Enum.map(function.params, &Macro.var(&1.name, nil))
+    response_module = Module.concat(service_module, Service.module_name(function, :response))
 
     quote do
-      def handle_thrift(unquote(fn_name), binary_data, handler_module) do
-        case unquote(args_module).BinaryProtocol.deserialize(binary_data) do
-          {%unquote(args_module){unquote_splicing(struct_matches)}, ""} ->
-            unquote(build_handler_call(file_group, function, response_module))
-
-          {_, extra} ->
-            raise Thrift.TApplicationException, [
-              message: "Could not decode #{inspect extra}",
-              type: :protocol_error
-            ]
+      def handle_thrift(unquote(function.name), binary_data, handler_module) do
+        unquote(args_block(service_module, function))
+        try do
+          handler_module.unquote(handler_fn_name)(unquote_splicing(handler_args))
+        rescue
+          unquote(rescue_blocks(function, file_group, response_module))
+        catch
+          unquote(catch_block)
+        else
+          unquote(else_block(function, response_module))
         end
       end
     end
   end
 
-  defp build_handler_call(file_group, function, response_module) do
-    handler_fn_name = Utils.underscore(function.name)
-    handler_args = function.params
-    |> Enum.map(&Macro.var(&1.name, nil))
-
+  defp args_block(_service_module, %Function{params: []} = _function) do
     quote do
-      rsp = handler_module.unquote(handler_fn_name)(unquote_splicing(handler_args))
-      unquote(build_responder(function.return_type, response_module))
+      _ = binary_data
     end
-    |> wrap_with_try_catch(function, file_group, response_module)
+  end
+  defp args_block(service_module, function) do
+    args_module = Module.concat(service_module, Service.module_name(function, :args))
+    struct_matches = Enum.map(function.params, &{&1.name, Macro.var(&1.name, nil)})
+    quote do
+      {%unquote(args_module){unquote_splicing(struct_matches)}, ""} = unquote(args_module).BinaryProtocol.deserialize(binary_data)
+    end
   end
 
-  defp wrap_with_try_catch(quoted_handler, function, file_group, response_module) do
-    rescue_blocks = function.exceptions
-    |> Enum.flat_map(fn
+  defp rescue_blocks(function, file_group, response_module) do
+    Enum.flat_map(function.exceptions, fn
       exc ->
         resolved = FileGroup.resolve(file_group, exc)
         dest_module = FileGroup.dest_module(file_group, resolved.type)
@@ -99,38 +93,34 @@ defmodule Thrift.Generator.Binary.Framed.Server do
 
         quote do
           unquote(error_var) in unquote(dest_module) ->
-            serialized_exception = %unquote(response_module){unquote(field_setter)}
-            |> unquote(response_module).BinaryProtocol.serialize()
-            {:reply, serialized_exception}
+            exception = %unquote(response_module){unquote(field_setter)}
+            {:reply, unquote(response_module).BinaryProtocol.serialize(exception)}
         end
     end)
+  end
 
+  defp catch_block() do
     quote do
-      try do
-        unquote(quoted_handler)
-      rescue
-        unquote(rescue_blocks)
-      catch kind, reason ->
+      kind, reason ->
         formatted_exception = Exception.format(kind, reason, System.stacktrace)
         Logger.error("Exception not defined in thrift spec was thrown: #{formatted_exception}")
         {:server_error, Thrift.TApplicationException.exception(
           message: "Server error: #{formatted_exception}",
           type: :internal_error)}
-      end
     end
   end
 
-  defp build_responder(:void, _) do
+  defp else_block(%Function{return_type: :void}, _response_module) do
     quote do
-      _ = rsp
-      :noreply
+      _ ->
+        :noreply
     end
   end
-
-  defp build_responder(_, response_module) do
+  defp else_block(%Function{}, response_module) do
     quote do
-      response = %unquote(response_module){success: rsp}
-      {:reply, unquote(response_module).BinaryProtocol.serialize(response)}
+      rsp ->
+        response = %unquote(response_module){success: rsp}
+        {:reply, unquote(response_module).BinaryProtocol.serialize(response)}
     end
   end
 end

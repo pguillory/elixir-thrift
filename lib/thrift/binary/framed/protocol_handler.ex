@@ -19,33 +19,56 @@ defmodule Thrift.Binary.Framed.ProtocolHandler do
     :ok = :ranch.accept_ack(ref)
     transport.setopts(socket, packet: 4)
 
-    do_thrift_call({transport, socket, server_module, handler_module})
+    do_thrift_call(transport, socket, server_module, handler_module)
   end
 
-  defp do_thrift_call({transport, socket, server_module, handler_module} = args) do
-    thrift_response  = with({:ok, message}      <- transport.recv(socket, 0, 20_000),
-                            parsed_response     <- Protocol.Binary.deserialize(:message_begin, message)) do
+  @call 1
+  @reply 2
 
-      handle_thrift_message(parsed_response, server_module, handler_module)
+  defp do_thrift_call(transport, socket, server_module, handler_module) do
+    case transport.recv(socket, 0, 20_000) do
+      {:ok, message} ->
+        case message do
+          <<128, 1, 0, @call, 4::32, "ping", seq_id::32, 0>> ->
+            data = <<128, 1, 0, @reply, 4::32, "ping", seq_id::32, 2, 0::16, 1, 0>>
+            :ok = transport.send(socket, data)
+            do_thrift_call(transport, socket, server_module, handler_module)
+          _ ->
+            parsed_response = Protocol.Binary.deserialize(:message_begin, message)
+            thrift_response = handle_thrift_message(parsed_response, server_module, handler_module)
+
+            case thrift_response do
+              {:ok, :reply, thrift_data} ->
+                :ok = transport.send(socket, thrift_data)
+                do_thrift_call(transport, socket, server_module, handler_module)
+
+              {:error, {:server_error, thrift_data}} ->
+                :ok = transport.send(socket, thrift_data)
+                exit({:shutdown, :server_error})
+
+              {:error, _} = err ->
+                Logger.info("Thrift call failed: #{inspect err}")
+                :ok = transport.close(socket)
+            end
+
+        end
     end
 
-    case thrift_response do
-      {:ok, :reply, thrift_data} ->
-        :ok = transport.send(socket, thrift_data)
-        do_thrift_call(args)
+    # thrift_response  = with({:ok, message}      <- transport.recv(socket, 0, 20_000),
+    #                         parsed_response     <- Protocol.Binary.deserialize(:message_begin, message)) do
 
-      {:error, {:server_error, thrift_data}} ->
-        :ok = transport.send(socket, thrift_data)
-        exit({:shutdown, :server_error})
+    #   handle_thrift_message(parsed_response, server_module, handler_module)
+    # end
 
-      {:error, _} = err ->
-        Logger.info("Thrift call failed: #{inspect err}")
-        :ok = transport.close(socket)
-    end
+  # def deserialize(:message_begin, <<1::size(1), 1::size(15), _::size(8),
+  #                 0::size(5), message_type::size(3),
+  #                 name_size::32-signed, name::binary-size(name_size), sequence_id::32-signed, rest::binary>>) do
+  #   {:ok, {to_message_type(message_type), sequence_id, name, rest}}
+  # end
   end
 
   def handle_thrift_message({:ok, {:call, sequence_id, name, args_binary}}, server_module, handler_module) do
-    case server_module.handle_thrift(name, args_binary, handler_module) do
+    case server_module.handle_thrift(String.to_existing_atom(name), args_binary, handler_module) do
       {:reply, serialized_reply} ->
         message = Protocol.Binary.serialize(:message_begin, {:reply, sequence_id, name})
 

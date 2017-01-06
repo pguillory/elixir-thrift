@@ -63,8 +63,8 @@ defmodule Thrift.Generator.Binary.Framed.Client do
 
     quote do
       unquote(def_type)(unquote(underscored_options_name)(client, unquote_splicing(vars), opts)) do
-        serialized_args = %unquote(args_module){unquote_splicing(assignments)}
-        |> unquote(args_module).BinaryProtocol.serialize
+        args = %unquote(args_module){unquote_splicing(assignments)}
+        serialized_args = unquote(args_module).BinaryProtocol.serialize(args)
 
         sequence_id = :erlang.unique_integer([:positive])
         message = Binary.serialize(
